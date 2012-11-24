@@ -1,0 +1,131 @@
+Notes on using workqueues
+
+/*
+ * 
+ * 2003-4-25  Emulate_softirq.c  by George Anzinger
+ *	        Copyright (C) 2003 MontaVista Software.
+ *		Copyright 2003 Sony Corporation.
+ *		Copyright 2003 Matsushita Electric Industrial Co., Ltd.
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License version 2 as
+ *  published by the Free Software Foundation.
+ */
+
+The header file '.../include/linux/emulate_softirq.h' provides
+replacements for all the softirq functions.  These include:
+
+Softirq functions:
+open_softirq
+raise_softirq
+__cpu_raise_softirq
+
+Timer functions:
+add_timer
+del_timer
+del_timer_sync
+mod_timer
+init_timer
+timer_pending
+
+Tasklet functions:
+DECLARE_TASKLET
+DECLARE_TASKLET_DISABLED
+tasklet_init
+tasklet_kill
+tasklet_hi_schedule
+tasklet_schedule
+tasklet_enable
+tasklet_hi_enable
+
+Bottom half functions:
+mark_bh
+init_bh
+remove_bh
+
+And in addition, since bh_disable no longer makes sense:
+local_bh_disable
+local_bh_enable
+__local_bh_enable
+
+To convert a subsystem (driver, network, etc.) to use workqueues you
+just need to include this header, at the end of the list of includes for
+each module in the subsystem.  The include should be as follows:
+
+#ifdef CONFIG_xxx_TO_USE_WORKQUEUES /* optional, allows switching */
+#define WQ_NAME <name> /* 10 char or less name of the workqueue */
+#include <linux/emulate_softirq.h>
+#endif
+
+In addition, you need to do:
+
+#define WQ_DATA_HERE
+
+prior to the above include in one, and only one, of the source code
+modules for the subsystem.  This "define" must be prior to the include
+and need not be protected with "ifdef" or otherwise.  The header will
+use this as a clue that the emulation data structures are to be defined
+here.  If the subsystem has module components, this source code  must
+also be added to the "export_objs" list in the Makefile which makes the
+given source code object.
+
+If you don't supply a name, 'UNAME' will be used.  If you want to do more
+than one subsystem you must supply a name to make each subsystem use a
+different workqueue.
+
+When softirq runs a function (timer, tasklet, softirq function, bottom
+half) it does it only if the local_bh_enable allows it to run.  This is
+usually used with 'spin_lock_bh' and friends as well as the above
+bh_disable/enable functions to provide mutex like exclusion between the
+function and the rest of the subsystem.  In the softirq_emulation
+package the bh_disable/enable functions are replaced with reentrant
+semaphores.  The reentrancy is needed because the bh_lock is a counting
+lock, i.e. each lock request increments a count and each unlock
+decrements the count.  Only when zero is bh enabled.  Since the bh_lock
+is per cpu, the semaphore is also per cpu.  This semaphore is shared
+with all the softirq replacement functions.
+
+This, of course, is not an ideal way to do things.  A better way is to
+use standard mutex and spin lock functions, but for the emulation
+package this is not feasible.  A rewrite of the subsystem to use
+workqueues should change the code to eliminate the per cpu bh semaphore
+in favor of finer grained locks.  Such a rewrite, by using lock macros
+that are sensitive to a CONFIG option, could still allow switching
+between workqueues and the softirq model.
+
+Limitations of emulate_softirq.  
+
+As currently coded, attempting to run a tasklet while that same tasklet
+is active (i.e. executing in the tasklet function) will cause an Oops.
+Since the same workqueue is used for all executions of the tasklet, this
+can only happen on SMP machines.  The emulation enforces all the other
+semantics of tasklets, so, since a tasklet schedule on a tasklet that is
+already scheduled is ignored, to make the above fault happen, the
+schedule must happen while the tasklet is active.
+
+Notes on using workqueues.
+
+The work structure contains a 'pending' flag which is set when the
+structure is queued either on a timer (via the queue_delayed_work()
+function) or on a workqueue.  This bit is cleared when the structure is
+no longer needed to do the work which happens just prior to the work
+being executed.  This means the same structure can be reused to do more
+work.  It also means that attempts to use the structure for work while
+it is pending are ignored with the function passing back 'false'.
+
+The cancel_work() function was implemented as an analog to the
+del_timer() and del_timer_sync() functions, however, it will also cancel
+work that is not queued with a delay if it is still in the queue.  The
+function passes back 'true' if the work element is found on one of the
+queues or if the element is being queued after its timer elapses during
+the call to cancel_work().  Unlike del_timer_sync() the function does
+not wait for, nor detect, completion of the given work function.
+
+The mod _delayed_work() function is an analog to the mod_timer()
+function and always queues the work element with the given expire time.
+
+Notes on locking.
+
+Unlike tasklets, the same work element can be active on more than one
+cpu (SMP systems only) at the same time.  The work function should lock
+as needed to avoid problems with this.

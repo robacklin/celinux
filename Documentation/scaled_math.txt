@@ -1,0 +1,169 @@
+This file gives a bit of information on scaling integers, the math
+involved, and the considerations needed to decide if and how to use
+scaled math. 
+
+What is it anyway?
+
+Scaled math is a method of doing integer math which allows you to:
+
+A.) Work with fractions in integer math.
+B.) Use MPY instead of DIV (much faster).
+C.) To reduce round off (or digitizing) errors.
+
+Basically, in scaled math you would replace an equation of this sort:
+
+r = foo / bar                or r = foo * top / bar
+
+with this:
+
+r = (foo * SC) / (bar * SC)  or r = (foo * top *SC) / (bar * SC)
+
+Regrouping these:
+
+r = foo * (SC / bar) / SC    or r = foo * ((top *  SC) / bar) / SC
+
+SC is the scale factor.  We choose SC carefully to retain the most bits
+in the calculation and to make the math easy.  We make the math easy by
+making SC be a power of 2 so the * SC and / SC operations are just
+shifts.
+
+
+How does it accomplish all this?
+
+The best way to show the benefits of scaled math is to go through an
+example.  Here is a common problem: During boot up of an 800MHZ machine
+we measure the speed of the machine against the time base.  In the case
+of the i386 machine with a TSC this means we program the PIT for a fixed
+time interval and measure the difference in TSC values over this
+interval.  Suppose we measure this over 0.010 seconds (10 ms).  With
+this particular machine we would get something like 8,000,000 (call this
+TSC-M).  We want to use this number to convert TSC counts to micro
+seconds.  So the math is:
+
+usec = tsccount * 0.01 * 1000000 / TSC-M   or
+usec = tsccount * 10000 / TSC-M
+
+Now the first thing to notice here is that (10000 / TSC-M) is less than
+one and, if we precalculated it we would loose big time.  We might try
+precalculating (TSC-M / 100000) but this also has problems.  First it
+would require a "div" each time we wanted to convert a "tsccount" to
+micro seconds.  The second problem is that the result of this
+precalculation would be on the order of 80, or only 6 to 7 bits so we
+would loose a lot of precision.
+
+The scaled way to do this is to precalculate ((10000 * SC) / TSC-M).  In
+fact this is what is done in the i386 time code.  In this case SC is
+(2**32).  This allows micro seconds to be calculated as:
+
+usec = tsccount * ((10000 * SC) / TSC-M) / SC
+
+where ((10000 * SC) / TSC-M) is a precalculated constant and "/ SC"
+becomes a right shift of 32 bits.  The easy way to do this is to do a
+simple "mul" instruction and take the high order bits as the result.
+I.e. the right shift doesn't even need to be done in this case.
+
+What have we gained here?
+
+The precision is much higher.  The constant will be on the order of
+5,368,709 so we have about 1 bit in 5 million of precision, not bad.
+
+We now do a multiply to do the conversion which is much faster than the
+divide.  Note, also, if we happen to want nano seconds instead of micro
+seconds we could just change the constant term to:
+
+(10000000 * SC) / TSC-M
+
+which has even more precision.  Note here that we are really trying to
+multiply the TSC count by something like 1.25 (or divide it by 0.8) both
+of which are fractions that would loose most of there precision with out
+scaling. 
+
+How to choose SC:
+
+SC has to be chosen carefully to avoid both underflow and overflow.
+
+With the routines provided in the sc_math.h file, the calculations expand
+for a brief moment to 64-bits and then are reduced back to 32-bits.  For
+example, the calculation of ((10000 * SC) / TSC-M) will shift "10000"
+left 32 bits to form a 64-bit numerator for the divide by TSC-M.  SC
+must be chosen so that the result of the divide is no more than 32-bits
+(i.e. does not overflow).  In our example, this defines the slowest
+machine we can handle (10,000 tsc counts in 0.01 sec or 1MHZ).
+
+Like wise, if SC is too small, the result will be too small and
+precision will be lost.
+
+Notes on the sc_math.h functions:
+
+What the sc_math.h functions do is to provide routines that allow usage
+of the ability of the hardware to multiply two integers and return a
+result that is twice the length of the original integers.  At the same
+time it provides access to the divide instruction which can divide a
+64-bit numerator by a 32-bit denominator and return a 32-bit quotient and
+remainder. 
+
+In addition, to help with the scaling, routines are provide that combine
+the common scaling shift operation with the multiply or divide.
+
+Since (2**32) is a common scaling, functions to deal with it most
+efficiently are provided.
+
+Functions that allow easy calculation of conversion constants at compile
+time are also provided.
+
+Details:
+
+All the functions work with unsigned long or unsigned long long.  We
+leave it for another day to do the signed versions.  Also, we have
+provided a generic sc_math.h file.  This begs for each 32-bit arch to
+supply an asm version which will be much more efficient.
+
+SC_32(x) given an integer (or long) returns  (unsigned long long)x<<32 
+SC_n(n,x) given an integer (or long) returns  (unsigned long long)x<<n
+
+These may be used to form constants at compile time, e.g.:
+
+unsigned long sc_constant = SC_n(24, (constant expression)) / constant;
+
+mpy_sc32(unsigned long a, unsigned long b); returns (a * b) >> 32
+
+mpy_sc24(unsigned long a, unsigned long b); returns (a * b) >> 24
+
+mpy_sc_n(const N, unsigned long a, unsigned long b); returns (a * b) >> N
+
+Note: N must be a constant here.
+
+div_sc32(unsigned long a, unsigned long b); returns (a << 32) / b
+
+div_sc24(unsigned long a, unsigned long b); returns (a << 24) / b
+
+div_sc_n(const N, unsigned long a, unsigned long b); returns (a << N) / b
+
+Note: N must be a constant here.
+
+In addition, the following functions provide access to the mpy and div
+instructions:
+
+mpy_l_X_l_ll(unsigned long mpy1, unsigned long mpy2); 
+returns (unsigned long long)(mpy1 * mpy2)
+
+mpy_l_X_l_h(unsigned long mpy1, unsigned long mpy2, unsigned long *hi);
+returns (unsigned long)(mpy1 * mpy2) & 0xffffffff  and 
+        (unsigned long)(mpy1 * mpy2) >> 32 in hi
+
+mpy_ll_X_l_ll(unsigned long long  mpy1, unsigned long mpy2);
+returns (unsigned long long)(mpy1 * mpy2)
+
+Note: The long long mpy1, this routine allows a string of mpys where it
+is undetermined where the result becomes long long.
+
+div_ll_X_l_rem(unsigned long long divs, unsigned long div, unsigned long *rem);
+returns (unsigned long)(divs/div) 
+with the remainder in rem
+
+div_long_long_rem() is an alias for the above.
+
+div_h_or_l_X_l_rem(unsigned long divh, unsigned long divl, 
+		   unsigned long div, unsigned long *rem)
+returns (unsigned long)((divh << 32) | divl) / div 
+with the remainder in rem

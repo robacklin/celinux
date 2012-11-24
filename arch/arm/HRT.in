@@ -1,0 +1,56 @@
+mainmenu_option next_comment
+comment 'POSIX and High-Resolution Timers'
+
+if [ "$CONFIG_ARCH_OMAP" = "y" ]; then 
+ ###
+ ### On ARM, High-resolution timers are implemented ONLY FOR TI OMAP
+ ###
+ bool 'Configure High-Resolution-Timers' CONFIG_HIGH_RES_TIMERS
+
+ if [ "$CONFIG_HIGH_RES_TIMERS" = "y" ]; then
+   choice 'Number of hardware timers used ?' \
+	"3		CONFIG_HIGH_RES_TIMER3 \
+	 2		CONFIG_HIGH_RES_TIMER2 \
+	 1		CONFIG_HIGH_RES_TIMER1" 3
+ fi	 
+else
+ define_bool CONFIG_HIGH_RES_TIMERS n 
+fi
+
+if [ "$CONFIG_HIGH_RES_TIMERS" = "n" ]; then
+   bool 'Configure new timer list' CONFIG_NEW_TIMERLIST
+else
+   define_bool CONFIG_NEW_TIMERLIST y
+fi
+
+if [ "$CONFIG_NEW_TIMERLIST" = "y" ]; then
+   choice 'Size of timer list?' \
+	"512		CONFIG_TIMERLIST_512 \
+	 1024		CONFIG_TIMERLIST_1k  \
+	 2048		CONFIG_TIMERLIST_2k  \
+	 4096		CONFIG_TIMERLIST_4k  \
+	 8192		CONFIG_TIMERLIST_8k" 512
+fi
+
+if [ "$CONFIG_TIMERLIST_512" =  "y" ]; then
+   define_int CONFIG_NEW_TIMER_LISTSIZE 512
+fi
+
+if [ "$CONFIG_TIMERLIST_1k" =  "y" ]; then
+   define_int CONFIG_NEW_TIMER_LISTSIZE 1024
+fi
+
+if [ "$CONFIG_TIMERLIST_2k" =  "y" ]; then
+   define_int CONFIG_NEW_TIMER_LISTSIZE 2048
+fi
+if [ "$CONFIG_TIMERLIST_4k" =  "y" ]; then
+   define_int CONFIG_NEW_TIMER_LISTSIZE 4096
+fi
+if [ "$CONFIG_TIMERLIST_8k" =  "y" ]; then
+   define_int CONFIG_NEW_TIMER_LISTSIZE 8192
+fi
+
+int 'System wide maximum number of POSIX timers' CONFIG_MAX_POSIX_TIMERS 3000
+
+endmenu
+

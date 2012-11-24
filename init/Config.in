@@ -1,0 +1,15 @@
+# init/Config.in
+
+mainmenu_option next_comment
+comment 'Embedded options'
+
+bool 'Configure kernel features for embedded systems' CONFIG_EMBEDDED
+if [ "$CONFIG_EMBEDDED" = "y" ]; then
+   bool '  Use preset loops_per_jiffy' CONFIG_USE_PRESET_LPJ
+   if [ "$CONFIG_USE_PRESET_LPJ" = "y" ]; then
+      int '  Loops per jiffy' CONFIG_PRESET_LPJ 0
+   fi
+fi
+
+endmenu
+

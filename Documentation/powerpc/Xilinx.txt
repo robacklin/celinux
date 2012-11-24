@@ -1,0 +1,183 @@
+---- Overview ----------------------------------------------------------------
+
+The Xilinx Virtex-II Pro chips are unique at this time.  They are large FPGAs
+that can have zero to four PowerPC 405 cores on the same die.  Currently, only
+a single 405 core is supported by Linux.
+
+Xilinx provides a variety of IP (Intellectual Property, the phrase used by
+hardware types to represent a ready-to-go, "canned" set of logic that can be
+dropped into a programmable device).  The provided IP implements a variety of
+useful peripherals.  When the system powers up, the IP is automatically
+loaded into the FPGA from a file (a.k.a. a bitstream) from the first
+partition (which must be a FAT partition) on a CompactFlash.  This is done by
+a piece of hardware known as System ACE.  The System ACE can be told which
+one of eight different configurations it should load into the FPGA.  System
+ACE also gives the 405 core access to the CompactFlash and JTAG chain during
+runtime.
+
+
+---- Xilinx Access Functions and Linux Drivers -------------------------------
+
+Most of the Xilinx peripherals are custom Xilinx implementations that may
+change over their lifetime.  To try to minimize the effort that this could
+cause, Xilinx provides OS independent functions that have been released under
+the GPL.  These OS independent functions should be called in lieu of directly
+accessing the hardware.  The Xilinx functions are used for multiple OSes and
+will be maintained by Xilinx.  A given OS utilizes these functions by writing
+a chunk of code that Xilinx refers to as an adapter.
+
+The following Linux drivers use the Xilinx provided access functions and
+implement the adapter as a single source:
+
+  Peripheral		Driver location			Adapter
+  --------------------  ------------------------------  -----------------
+  Ethernet		drivers/net/xilinx_enet/	adapter.c
+  GPIO			drivers/char/xilinx_gpio/	adapter.c
+  PS/2			drivers/char/xilinx_keyb/	x8042.c
+  IIC			drivers/i2c/xilinx_iic/		i2c-algo-xilinx.c
+  System ACE  		drivers/block/xilinx_sysace/	adapter.c
+  Touch Screen		drivers/char/xilinx_ts/		adapter.c
+
+The System ACE driver allows the CompactFlash to be used as a block device as
+well as a method of controlling which bitstream the System ACE should load at
+the next reset.
+
+There are a few other Xilinx peripherals that Linux provides access to, but do
+not utilize the Xilinx access functions:
+
+  Peripheral		Driver location
+  --------------------  ------------------------------
+  TFT LCD driver	drivers/video/xilinxfb.c
+  UART's		drivers/char/serial.c
+  Interrupt Controller  arch/ppc/kernel/xilinx_pic.c
+
+Xilinx does not provide access functions for the LCD driver, so it is
+implemented just as a standard Linux frame buffer driver.  Xilinx does provide
+access functions for the UART's and Interrupt Controller, but they are not
+used.  The UART's are standard 16450/16550's so by definition, serial.c "just
+works".  Whether or not the the Xilinx access functions should be used to
+access the Interrupt Controller is a decision that hasn't been finalized, but
+for the time being, xilinx_pic.c talks directly to the hardware.
+
+The files in arch/ppc/platforms/xilinx_ocp/ are the underpinnings for the
+Xilinx access functions.  Most of those files are provided by Xilinx.  The
+Xilinx code defines and uses two macros that are useful during driver
+development.   They are XASSERT_VOID and XASSERT_NONVOID.  The Xilinx uses
+these macros to ensure that required conditions are met.  After development is
+done, the macros can be disabled to save space and time.  The definition of
+the macros is controlled by whether or not NDEBUG is defined in
+arch/ppc/platforms/xilinx_ocp/xbasic_types.h.  The macros are currently
+disabled.  If you are going to be developing code that makes use of the Xilinx
+code, you will probably save yourself some time if you enable the macros.
+
+
+---- Peripheral Configuration ------------------------------------------------
+
+A system is built by running Xilinx's System Generator.  The System Generator
+is told how many of each peripheral (if any) should be loaded into the FPGA.
+The System Generator then produces the bitstream that is put on the
+CompactFlash (ultimately to be loaded into the FPGA).  Linux needs to somehow
+know what peripherals are in the system and how to talk to them.  Currently,
+this is done at compile time by having the System Generator output C source.
+Ultimately, the hope is that Linux can determine this at run time using
+Xilinx's Configuration ROM (CROM), but the how/when/if of that is unknown.
+
+The C sources that are output by the System Generator include the Xilinx
+functions previously mentioned, as well as the configuration information.  The
+exact format of the configuration information is evolving, but is completely
+functional at this time.  The System Generator outputs an include file named
+xparameters.h.  xparameters.h #define's information about all of the
+peripherals in the system. An xparameters.h for the ML300 has been placed in:
+
+  arch/ppc/platforms/xilinx_ocp/xparameters_ml300.h
+
+This file is included based upon CONFIG_ variables from:
+
+  arch/ppc/platforms/xilinx_ocp/xparameters.h
+
+The idea is that each Xilinx based board can put their xparameters.h under a
+different name and then add code to xparameters.h to include the appropriate
+file.
+
+In addition to xparameters.h, an include file is output as part of each set of
+Xilinx access functions.  These files have a name of the form x*_g.h.  These
+files define arrays that contain values from xparameters.h to make information
+about each instance of each peripheral available.
+
+Now for a bit of hand waving.  The System Generator isn't completed yet, so
+these files are currently hand-generated.  Also as mentioned above, these
+whole setup is evolving with the idea of a central repository for this
+information, much like the OCP does for the IBM on-chip peripherals.
+Ultimately as OCP and the Xilinx configuration strategies evolve, it would be
+nice for them to grow together.
+
+As a note, one of the areas that is ripe for evolution is handling of the IRQ
+information.  Right now, it is not handled by the Xilinx functions and the
+values defined in xparameters.h are not the same as in the hardware
+documentation.  For example, what would be interrupt 0 per the hardware manual
+is referred to as interrupt 31 in the xparameters.h.
+
+
+---- The Future --------------------------------------------------------------
+
+There are a number of things marked by SAATODO in the code that should be
+addressed.  Typically, more information can be found in the source, but here
+is a high-level list:
+
+  As mentioned above, the final decision about whether or not the interrupt
+  controller will be changed to use the Xilinx access functions has not been
+  made.  If it is decided that the current code stays, the ACKNOWLEDGE_AFTER
+  code in xilinx_pic.c should be revisited to ensure that it is correct.
+
+  The adapters define functions of the form *_GetConfig.  This functionality
+  needs to be pushed into the Xilinx code, but as mentioned above, access to
+  configuration information is evolving.
+
+  The GPIO adapter defines XGpio_GetDataDirection.  This function needs to be
+  pushed into the Xilinx code.
+
+  The System ACE adapter defines XSysAce_GetCfgAddr.  This function needs to
+  be pushed into the Xilinx code.
+
+  PS/2 issues:
+   Keyboard/Mouse interference.
+   Generate interrupt when OBF set.
+   Handle disables.
+
+  IIC issues:
+   Use timeout and retry?
+   Sending > 16 bytes.
+   Non-experimental I2C IDs.
+
+  Xilinx does not yet support multicast or scatter-gather DMA for the
+  ethernet.  Once those are supported by Xilinx, the Linux driver can
+  be enhanced to add support for them.
+
+Code has been added to enable the PCI bridges and there has been some limited
+testing, but the effort should be considered preliminary for now.
+
+The Xilinx ML300 has many peripherals that are not yet handled or tested.
+Code could be added to take advantage of them.
+
+
+---- Oddities ----------------------------------------------------------------
+
+As I've been developing, I've noticed some things that I haven't followed up
+on, but have just kept a running list.  It is possible that some of these
+things are non-issues now.
+
+1) Networking
+ a)The network performance doesn't seem to be as good as it should be.
+   It is believed that once scatter-gather is supported, this problem
+   will be resolved.
+ b)Under heavy load (e.g. recursive cksum over NFS), I've seen errors such as:
+      eth0: device error 8, resetting device.
+      NETDEV WATCHDOG: eth0: transmit timed out
+      eth0: Exceeded transmit timeout of 60000 ms.  Resetting emac.
+   Obviously, this shouldn't happen and needs to be fixed.
+ c)It has been reported that the NFS block size needs to be lowered in some
+   cases.  This should be investigated, but at this point, it is believed to
+   be a problem with the NFS server instead of a problem with the ML300.
+
+2) When the Xilinx drivers get made, the next time make is ran they get
+   remade once more.  Figure out what is wrong in the Makefiles.

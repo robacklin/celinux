@@ -1,0 +1,240 @@
+Hollis Blanchard, IBM Linux Technology Center
+6 Jan 2003
+
+Bishop Brock, IBM Low-Power Computing Research Center
+Revised May, 2003
+
+Linux Sleep on the PowerPC 405LP
+--------------------------------
+
+The IBM 405LP embedded CPU supports three different sleep modes, controlled by
+a unit called "APM0".  These three hardware modes have been used to specify 
+six different types of sleep.  Not all hardware platforms will necessarily
+support all modes of sleep.
+
+APM has four wakeup interrupt lines which it cascades onto the UIC as irq
+24. These "wakeups" function similar to other interrupt sources when the 405LP
+is executing normally.  When the 405LP enters a sleep mode, however, the only
+things that can wake it are these four wakeup lines, and the APM (master) reset
+signal. One wakeup line is connected to the RTC interrupt line, allowing wakeup
+when an RTC alarm goes off. The other three wakeups are more-or-less
+programmable and board-dependent.  On both Beech and Arctic2 one of the wakeups
+is connected to a physical pushbutton to provide a soft power switch.
+
+Sleep Modes
+-----------
+
+1. In "clock-suspend" mode the output of the PLL is stopped. No units are
+powered down, and so no state is lost. SDRAM must held in self refresh to avoid
+losing SDRAM contents. On wakeup, the PLL continues and processing resumes
+exactly where it left off.
+
+2. In "power-down" mode, APM signals the power supply to drop power to the CPU
+and integrated peripherals. The Linux implementation subdivides this hardware
+mode into four different types of power-down sleep. In simple power-down
+mode, all system state is lost, and the system simply reboots when
+awakened or reset. Linux also supports a "failsafe-power-down" mode similar to
+power-down, except that the APM wakeup mechanism is disabled before going to
+sleep.  This mode requires a master reset to restart and reboot the system.
+
+The power-down state can also be used to implement laptop-like suspend modes.
+In these modes all important state, including GPRs, SPRs, and DCRs must be
+saved by software before entering the sleep mode, and restored after wakeup.
+In "suspend" mode SDRAM is not powered off, so state can be saved there as long
+as SDRAM is put into self-refresh mode prior to the sleep.  In "hibernate" mode
+the SDRAM contents are copied to non-volatile storage, and then the entire
+system can be powered down. [ This mode has not yet been fully implemented. ]
+
+When a wakeup from power-down occurs, the chip (CPU and integrated peripherals)
+is reset, returning control to the firmware. The firmware must determine
+whether this is a wakeup from a normal power-down, leading to a reboot, or
+wakeup from a suspend or hibernate, requiring restoration of the system
+context.  The mechanism used to communicate the sleep mode to the firmware is
+discussed further below.
+
+3. The "standby" mode is a specialized clock-suspend mode unique to the 405LP.
+In "standby" mode, APM first freezes the PLL. It then transfers all chip state
+(excluding CPU core state and peripheral arrays such as the LCD palette) over
+the i2c bus to a nonvolatile storage device (such as an EEPROM). Once that
+process is complete, APM signals the power supply to drop power to the CPU and
+integrated peripherals.  To the external system, standby mode appears to be a
+clock stop mode, so , for example, SDRAM must be held in self refresh.
+
+When a wakeup occurs, APM transfers the saved chip state back over the i2c bus.
+The CPU core is reset but held frozen. APM then releases the PLL and processing
+continues from the reset vector, returning control to the firmware. The
+firmware must determine that this is a wakeup from a standby state by by polling
+the APM0_CFG and APM0_SR registers, and taking the appropriate action.
+
+Firmware Interaction with Linux
+-------------------------------
+
+Note that because the CPU is reset on wakeup in both power-down and standby
+modes, the firmware *must* be made APM-aware. Otherwise, a wakeup will simply
+reset the chip, losing all state. 
+
+The clock-suspend mode does not require firmware interaction.  Linux handles
+the clock-stop, and the clock is restarted exactly at the point where Linux
+stopped the system.
+
+On wake from standby, suspend or hibernate, the firmware must know how to
+transfer control back to Linux (which is still resident in RAM). The following
+structure is used:
+
+struct wakeup_info {
+	void (*wakeup_func_phys)(u32 apm0_cfg, u32 apm0_sr); /* physical addr */
+	u32 magic;
+	...
+}
+
+Firmware is aware only of the first two fields. Linux creates and populates
+this structure in memory, and writes the pointer to a well-known location
+(currently 0xfc physical) for the firmware to read.  (Unfortunately there are
+no "scratch" registers provided by the APM unit, requiring used of a
+predetermined absolute physical address.) The magic number is intended to be a
+simple validator ensuring that the contents of SDRAM have not been corrupted.
+
+Currently Linux also saves one other value in the wakeup_info structure: the
+(physical) stack pointer.
+
+The contents of the APM0_CFG[SM] field are sufficient to identify a standby
+sleep.  In order to disambiguate power-down, sleep and hibernate, Linux writes
+a flag value in the RTC0_CEN DCR (RTC century register) before initiating the
+sleep.  If firmware detects the resumption from a power-down sleep, it takes
+action based on the flag value it finds in RTC0_CEN.
+
+Linux Sleep Procedure
+---------------------
+
+This is a high-level summary; the code is well-documented. Note that entry into
+all sleep modes is completely handled by Linux.
+
+For clock-suspend mode:
+
+        The power-management callbacks of all devices registered with LDM are
+        invoked. 
+        
+	Since this is a simple clock-suspend, no CPU or DCR state is saved, and
+	the clocks are simply stopped after placing SDRAM in self-refresh.
+
+For power-down and failsafe-power-down mode:
+
+	Since this is a simple power-down, no CPU or DCR state is saved, and
+	APM is commanded to power-down the system.
+
+For suspend and standby modes:
+
+        The power-management callbacks of all devices registered with LDM are
+        invoked. 
+
+	For suspend mode, Linux marks the mode for the firmware by a flag in
+	RTC0_CEN. 
+        
+	One page is allocated in which to save some CPU registers and selected
+	DCRs required by the mode.  For suspend mode, some system-level DCRs
+	not associated with a specific device driver (e.g., EBC, UIC) are
+	saved. In standby mode all registers external to the CPU are saved and
+	restored by the hardware mechanism, and only the APM_CFG and APM0_SR
+	registers and the SDRAM_CFG register will be touched by the firmware on
+	wakeup.
+
+	The non-volatile GPRs, all 64 TLB entries, and quite a few SPRs like LR,
+	MSR, and EVPR are saved to the stack in an assembly routine. The registers
+	saved here are those that must be restored before returning into C code on
+	wakeup; i.e. they cannot be saved and restored in C.
+
+	SDRAM is placed in self-refresh before initiating power-down.
+
+
+The final code is touched into the I-cache so that SDRAM can be put into
+self-refresh. The sleep command is written to the APM unit, and then the
+processor spins in a bdnz loop until either:
+1. the APM unit freezes the processor
+2. the CTR register decrements to zero, indicating sleep did not take place.
+This could happen if the wakeup were already asserted at the time the sleep
+command was issued.
+
+Firmware/Linux Wakeup Procedure
+-------------------------------
+
+If the firmware detects the resumption from a standby sleep, the firmware
+should only bring the SDRAM out of self-refresh, and then restart Linux as
+explained below.  If firmware detects the resumption from a suspend sleep, the
+firmware should perform the normal board setup (including establishing the
+default operating point) up to re-enabling the SDRAM controller, and then
+resume Linux as explained below.  In any other case the firmware reboots the
+system.
+
+To restart Linux, after validating the magic number the firmware jumps to the
+address specified by wakeup_info->wakeup_func_phys .  The processor *must* be
+in untranslated mode (MSR:IR/DR = 0) at this point.
+
+Back in Linux, the stack pointer is immediately restored from
+wakeup_info->wakeup_sp_phys so that SPRs can be loaded and restored from the
+stack. Finally, the non-volatile GPRs are restored, and control returns via an
+rfi to the C function executed before sleep, returning to translated mode
+(MSR:IR/DR = 1). The C function continues to restore non-essential registers
+which were not handled in assembly.
+
+The RTC remains active during sleep, but the timebase does not, and obviously
+jiffies has not been incremented. To restore the timebase, the pre-sleep RTC
+time is subtracted from the current RTC time to get the difference in seconds,
+and then the timebase is incremented by 
+
+(seconds elapsed) * HZ * tb_ticks_per_jiffy 
+
+
+User Interfaces
+---------------
+
+One of the interfaces to the sleep code is via sysctl (and its /proc
+interface). The following /proc items are present under /proc/sys/sleep :
+	suspend: (write-only)
+		triggers sleep
+	mode: (string)
+		contains one of "clock-suspend", "power-down",
+		"failsafe-power-down", "suspend", "hibernate" or "standby",
+		indicating the sleep mode to be used.
+	pm_alarm: (string)
+	        See below.
+	cdiv: (integer, for debugging only)
+		allows the user to override the "cdiv" field of APM0_CFG, which
+		controls the speed at which CPU state is transferred over the i2c bus.
+	watchdog: (integer, for debugging only)
+		allows user to disable the APM watchdog. Defaults to 1 (meaning the
+		watchdog is enabled).
+
+
+The pm_alarm entry can be used to program a wakeup using the RTC alarm
+mechanism.  If enabled at system shutdown, this alarm will wake up the
+processor from any of the sleep modes except failsafe-power-down. To program an
+alarm, write an 8-character string of the form hh:mm:ss (using a 24-hour clock)
+to /proc/sys/sleep/pm_alarm.  To indicate a don't-care value use an illegal
+value, e.g., 99. For example, writing "09:30:99" sets the alarm for 9:30 AM.
+Write the string "clear" to clear the alarm.  Reading the /proc file will
+return the current alarm time followed by either "clear", "armed" or "expired".
+This alarm mechanism only guarantees that the system will be awake when the
+alarm goes off.  NB: The RTC and system clocks may not be in sync; see 'man
+hwclock'.
+
+A generic button driver for a soft power switch connected to an APM wakeup
+input is also provided.  Pressing and releasing the button will initiate sleep
+using the current 'mode'.  If the button is pressed and held continuously for 5
+seconds the failsafe-power-down mode is entered.  Pressing the button on a
+sleeping system will wake it up (unless it was forced off using the
+failsafe-power-down mode).
+
+
+Other Issues
+------------
+
+If DPM is present the current operating point is suspended/resumed across
+"standby", "suspend" and "hibernate" modes.  If DPM is not configured, then
+upon resume the system will run at the operating point used by the firmware.
+standby mode can only be safely entered and exited in a well-constructed PLL
+bypass operating point that must be supplied by board support code. If this
+state is not defined, or if DPM is not present, then "clocksuspend" mode is
+substituted for "standby".  We assume that the EEPROM is properly programmed
+for standby mode.
+
+

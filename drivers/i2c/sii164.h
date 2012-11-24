@@ -1,0 +1,8 @@
+
+
+#define TI1500_IOC_MAGIC  'K'
+
+#define TI1500_DVI_OFF    _IO(TI1500_IOC_MAGIC, 0x50)
+#define TI1500_DVI_ON     _IO(TI1500_IOC_MAGIC, 0x51)
+
+#define TI1500_IOC_MAXNR 1

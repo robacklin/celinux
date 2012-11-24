@@ -1,0 +1,21 @@
+#
+# MMC subsystem configuration
+#
+mainmenu_option next_comment
+comment 'MMC/SD Card support'
+
+tristate 'MMC support' CONFIG_MMC
+if [ "$CONFIG_MMC" = "y" -o "$CONFIG_MMC" = "m" ]; then
+  bool '  MMC debugging' CONFIG_MMC_DEBUG
+  if [ "$CONFIG_MMC_DEBUG" = "y" ]; then
+    int '  MMC debugging verbosity (0=quiet, 3=noisy)' CONFIG_MMC_DEBUG_VERBOSE 0
+  fi
+fi
+
+comment 'MMC Controllers device drivers'
+
+if [ "$CONFIG_ARCH_OMAP" = "y" ]; then
+   dep_tristate 'OMAP1510 MMC/SD' CONFIG_OMAP_MMC $CONFIG_MMC
+fi
+ 
+endmenu

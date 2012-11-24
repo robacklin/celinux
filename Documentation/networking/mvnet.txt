@@ -1,0 +1,334 @@
+MontaVista(tm) Net driver for 21554 Embedded Bridge (Drawbridge)
+MontaVista Software, Inc.
+08/11/2003
+
+
+INTRODUCTION
+    This distribution contains MontaVista Net, our network driver for the
+    21554/21555 embedded bridge. MontaVista Net has been tested with the
+    following hardware:
+
+	Force   - PowerCore 680 (System Master)
+                  Powercore 6750 (Peripheral Master)
+	MCG     - MCP750 (System Master)
+                  MCPN750 & MCPN765 (Peripheral Masters)
+		  PrPMC800 (both in Monarch and non-Monarch modes)
+	MEN     - MENF001 (System Master)
+	SBS     - K2 (System Master only)
+	Ziatech - 5541 (Peripheral Master)
+
+
+HARDWARE CONFIGURATION
+21554/21555 Configuration:
+    Designs based on the 21554/21555 generally include a serial ROM which can
+    be used to preload selected chip registers (See the 21554 or 21555 Manual
+    for more information). MontaVista Net requires a specific 21554/21555
+    configuration for proper operation. The required configuration sets the
+    Downstream Memory 2 window to 1 MB and sets the page size of the Upstream
+    Memory 2 window to 1 MB as well.
+
+Programming the Serial ROM
+    Most 21554/21555-based boards to not arrive with the required configuration
+    as the default. Therefore, the SROM contents must be modified by the user.
+    Depending on the vendor, there are different methods available.
+
+
+    Motorola Computer Group (MCG) Hardware:
+    In addition to the utilities above, the debugger provided on MCG hardware
+    has the ability to display and edit the 21554 SROM contents using the
+    'SROM' command as follows:
+
+	PPC1-Bug>srom;d
+
+	Device Address =$0000A000 (N/Y)? y
+	Reading SROM into Local Buffer.....
+	$00 (&000) 80?
+	$01 (&001) 00?
+	$02 (&002) 00?
+	.
+	.
+	.
+	$1A (&026) 00? 00
+	$1B (&027) 00? 00
+	$1C (&028) 00? f0
+	$1D (&029) 00? ff
+	.
+	.
+	.
+	$30 (&048) 00?
+	$31 (&049) 04? 0
+	$32 (&050) 00?
+	$33 (&051) 00? d
+	$34 (&052) .
+	Update SROM (Y/N)? y
+	Writing SROM from Local Buffer.....
+	Verifying SROM with Local Buffer...
+
+    At this point you should halt the system and reset it to cause the
+    21554 to load the values from the serial ROM.
+
+
+    Force 6750
+    The Force 6750 can program the 21554 SROM from firmware as well using
+    the following sequence which reads the SROM contents into RAM at
+    0x40000 and displays it from RAM. The dump shown below contains the
+    proper SROM configuration.
+
+        PowerBoot> eeprom_read srom_dec21554_0 0 50 4000
+
+        PowerBoot> md 40000,50
+ 
+	00040000:  80 00 00 00 00 80 06 46  11 50 67 00 00 00 80 06
+	00040010:  00 00 00 00 00 00 00 00  00 00 00 00 f0 ff 00 00
+	00040020:  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00
+	00040030:  00 00 00 0d 20 00 ff ff  00 00 00 00 00 00 00 00
+	00040040:  06 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00
+
+    If the SROM contents require alteration, follow the example below as
+    a guideline for editing the SROM contents:
+
+        PowerBoot> m 40000,b
+
+        40000  00 : 80
+        40001  00 : 00
+        40002  00 : . <- enter a single '.' to terminate input.
+
+    Once the RAM buffer contains the proper contents, write the buffer to
+    the 21554 SROM as follows:
+
+        PowerBoot> eeprom_write srom_dec21554_0 0 50 40000
+
+    The board should now be reset to force a re-load of the 21554
+    configuration.
+    
+    Note that once this configuration has been set, a "setboot" command must
+    be used to re-configure the firmware to perform PCI2PCI bridge setup at
+    startup. If this is not performed, the default PCI addresses of the 21554
+    will conflict with those of system RAM and prevent proper network
+    operations.
+    
+    The settings below are known to work with the 21554 SROM programmed for
+    MontaVista Net when the PMC sites are not used:
+
+    PowerBoot> setboot
+
+     -General boot parameters-
+
+     Boot select [0=Net, 1=Flash, 6=SCSI, 7=PCI, 8=PCI+Net, 9=PCI+FLASH] (9) :
+     Auto boot [0=disable, 1=enable], (1) :
+     Auto boot delay [0..99s], (20) :
+     Load address (FFE00000) :
+     Boot address (FFE00000) :
+     Boot USER_FLASH [1..4], (1) :
+     Boot Disk SCSI-ID [0..15], (6) :
+     PMCx Controller SCSI-ID [0..15], (7) :
+
+      -TFTP Ethernet/Harddisk boot file parameters-
+
+      RARP [1] or ARP [2] protocol : (2) :
+      Server-IP# [aaa.bbb.ccc.ddd] :
+      Target-IP# [aaa.bbb.ccc.ddd] :
+      TFTP/Disk Boot file name :
+
+
+       -PMC modul mapping parameters-
+
+       PMC1 PCIbus I/O base address (00000000) :
+       PMC1 PCIbus MEM base address (00000000) :
+       PMC2 PCIbus I/O base address (00000000) :
+       PMC2 PCIbus MEM base address (00000000) :
+
+
+        -PCI-to-PCI bridge Upstream/Downstream window mapping addresses-
+
+	OVERwrite Upstream/Downstream Setup Regs [0=disable, 1=enable], (0):
+
+	Upstream   I/O MEM 0 BAR        (00860000) :
+	Upstream       MEM 1 BAR        (80000000) :
+	Upstream       MEM 2 BAR        (80100000) :
+	Downstream CSR MEM 0 BAR        (00000000) :
+	Downstream I/O MEM 1 BAR        (00000000) :
+	Downstream     MEM 2 BAR        (00000000) :
+	Downstream     MEM 3 BAR LOW    (00000000) :
+	Downstream     MEM 3 BAR UP     (00000000) :
+	Downstream     MEM 0 Trans Base (00000000) :
+	Downstream     MEM 0 Setup Reg. (00000000) : -NA-
+	Downstream I/O MEM 1 Trans Base (00000000) :
+	Downstream I/O MEM 1 Setup Reg. (00000000) : -NA-
+	Downstream     MEM 2 Trans Base (00000000) :
+	Downstream     MEM 2 Setup Reg. (00000000) : -NA-
+	Downstream     MEM 3 Trans Base (00000000) :
+	Downstream     MEM 3 Setup L Rg.(00000000) : -NA-
+	Downstream     MEM 3 Setup U Rg.(00000000) : -NA-
+	Upstream   I/O MEM 0 Trans base (00000000) :
+	Upstream   I/O MEM 0 Setup Reg. (00000000) : -NA-
+	Upstream       MEM 1 Trans base (00000000) :
+	Upstream       MEM 1 Setup base (00000000) : -NA-
+
+
+	 -PCI-to-PCI bridge LOCKOUT bit setup-
+
+	 Clear LOCKOUT bit [0=untouched, 1=clear], (0):
+ 
+   
+    The configuration shown above is for deployment with Linux booting from
+    FLASH memory. For development, it is often easier to boot from the network.
+    To do this, use the setboot command and change the "Boot select" field to
+    "8" which will setup the PCI2PCI bridge and then load the Linux image via
+    the network. If more control is needed, the "Boot select" field can be
+    set to 7 which will setup the PCI2PCI bridge and then come up to a prompt.
+    If access to a start-up prompt is required, do not attempt to simply
+    interrupt one of the other boot methods. Doing so interrupts the PCI2PCI
+    bridge setup and will leave the PCI2PCI bridge conflicting with system
+    RAM as noted above. Instead, interrupt the startup, configure the
+    "Boot select" field to 7 and reset the board. Allow the full startup
+    sequence to proceed until the firmware reports PCI2PCI bridge setup and
+    stops at the command prompt.
+   
+PrPMC800:
+    The PrPMC800 does not pre-configure the Harrier host bridge in hardware.
+    Instead, Linux must be programmed in on-board FLASH and PPCBug must be
+    configured to boot from FLASH. The first 1MB of FLASH is reserved for use
+    by PPCBug, so the Linux boot image must skip the first 1MB and be loaded
+    at 0xf0100000. This can be done using the "niop" command to load the
+    bugboot image (zImage.bugboot) and the "pflash" command to program FLASH.
+    See the PPCBug manual for details.
+
+    In systems that support the PrPMC EREADY signal, the Linux kernel running
+    on the System Master will wait for the release of the EREADY signal. The
+    Target (non-Monarch) PrPMCs will hold the EREADY signals until they have
+    configured thier Harrier host bridges with the proper configuration. Once
+    configured, EREADY will be released to allow PCI bus enumeration by the
+    System Master. If the System Master hangs at startup, verify that all
+    non-Monarch PrPMCs are configured to boot Linux from FLASH at startup.
+
+    In systems which do not support the EREADY signal, the startup must be
+    controlled by boot delays. Configure the boot delays such that the
+    non-Monarch PrPMCs start their Linux kernels before the System Master.
+    For example, configure the non-Monarchs for a 5 second delay and
+    configure the System Master for a 15-20 second delay. This ensures that
+    the Linux kernels in the non-Monarch PrPMCs have configured their Harrier
+    host bridges before the Linux kernel on the System Master enumerates the
+    PCI bus.
+
+
+
+USING THE MONTAVISTA NETWORK DRIVER
+    The MVNet driver emulates an Ethernet driver, and it can
+    be configured and used just like an Ethernet device in most respects.
+
+    On a MontaVista Linux system, the "pci0" device can be configured by
+    editing /etc/network/interfaces. For example the following snippet
+    enables the pci0 MVNet interface at startup and assigns it an IP
+    address:
+
+	    auto pci0
+	    iface pci0 inet static
+	    address 192.168.3.11
+	    network 192.168.3.0
+	    netmask 255.255.255.0
+	    broadcast 192.168.3.255
+
+
+    Perhaps the only difference between the 21554 driver and an Ethernet
+    device is that the drawbridge driver has no default hardware Ethernet
+    (MAC) address.  A unique address must be assigned, as in the MACADDR
+    statement above, or via a command such as:
+
+	ifconfig pci0 hw ether 42:80:42:0F:1F:C9
+
+    If your company owns a block of Ethernet addresses, you can assign
+    values from this block to the 21554 driver.  Each board should be
+    configured with a different MAC address. If the packets are confined
+    to the MVNet network, then the MAC addresses must only be unique among
+    the boards sharing that interface. The MVNet code provides a default
+    MAC address of 42:00:00:00:00:01. To make it easier to provide unique MAC
+    addresses, a kernel command line option exists to alter the LSB of the
+    default MAC address. Adding "mvnet_mac_lsb=xxx" will alter the LSB of
+    the MAC address to match the 8 least signifcant bits of "xxx". The value
+    defaults to decimal notation, but hex values can be entered by prefixing
+    the value with 0x.
+
+    If the MVNet driver is loaded as a module, the "mac_addr" parameter
+    can be added to the nsmod command line to set all 6 bytes of the MVNet
+    MAC address. To enter the MAC address in this manner, input the 6 bytes
+    with commas separating the individual bytes:
+    "mac_addr=42,00,00,00,00,01". Again, the values default to decimal, but
+    hex values can be entered by prefixing the values with 0x as follows;
+    "mac_addr=0x42,0x00,0x00,0x00,0x00,0x01".
+    
+
+    In order to associate the "pci0" device with the MontaVista Net Ethernet
+    driver, add the following line to /etc/modules.conf:
+
+	alias pci0 mvnet_drawb
+
+	or
+	alias pci0 mvnet_harr (if supporting non-Monarch PrPMC800s)
+
+    At this point, "modprobe pci0" should correctly locate and load
+    the network driver.  If the driver is loaded correctly, "ifconfig -a"
+    should show the "pci0" network device.
+
+
+PACKET ROUTING
+    All boards on a single backplane constitute a single subnet, and
+    IP addresses and masks should be assigned accordingly.  A MontaVista
+    Linux system can be configured to forward packets between an
+    external network and a backplane network by adding the following
+    to the line in /etc/network/interfaces:
+    
+    	echo "1" > /proc/sys/net/ipv4/ip_forward
+
+    Routes to and from external hosts can then be configured as you
+    would for a normal gateway device.
+
+
+COMPLEX CONFIGURATIONS
+The addition of non-Monarch PrPMC800 devices allows the creation of some
+fairly complex MVNet configurations. For example, consider a cPCI system
+containing a System Master with a PrPMC800 installed on a local PMC site
+along with a 21554/21555-based cPCI Peripheral device with a pair of
+PrPMC800 installed on its local PMC sites as sketched below.
+
+	System Master                 Peripheral Master
+		X <- Host bridge         X <- Host bridge
+		|                        |
+		+---+                    +---+-----+
+		|   |                    |   |     X <- PrPMC800 (site 2)
+		|   X <- PrPMC800        |   X <- PrPMC800 (site 1)
+		X <- trans-Bridge        X <- 21554/21555 non-trans. Bridge
+		|                        |
+		+------------------------+ <- cPCI backpanel
+
+
+In this case, the PrPMC800 installed on the System Master is in the same
+address space as the cPCI backpanel. If the PrPMC800s on the Peripheral
+Device are behind the 21554/21555 non-transparent bridge, they are
+not in the cPCI address space, but are in the private PCI address space
+of the Perpheral Master. This arrangement prevents direct access to the
+PrPMC800 installed in the Periheral Master. In this case, the Peripheral
+Master will host 2 MVNet interfaces. One interface will provide access to the
+System Master and the MVNet nodes in the cPCI address space (including the
+PrPMC800 installed on the PMC site of the System Master. The second MVNet
+interface will provide access between the Peripheral Master and the 2
+PrPMC800s installed on the local PMC sites. To allow communications between
+the PrPMC800s installed on the Peripheral Master and the devices on the cPCI
+bus, the Peripheral Master must route packets between the 2 MVNet interfaces.
+This is accomplished by configuring each of the MVNet interfaces with its
+own sub-net, configuring the proper gateways in the route tables and
+enabling the normal Linux ip forwarding mechanism. Once properly configured,
+each of the MVNet nodes can access each of the remaining nodes. If is also
+possible to configure the system such that the either the System Master, the
+Peripheral Master or both masters are able to forward packets to and from
+the PrPMC800s from external interfaces. This allows the PrPMC800s access to
+the outside world.
+
+For proper routing in the scenario shown above, each MVNet iinterface in the
+Peripheral Master must have a unique MAC address. The MVNet software creates
+these unique MAC addresses by adding the interface number to the 5th byte of
+the MAC address and trucating the result to 8 bits. For example, if the
+linux kernel on the Perpheral Master were assigned a MAC address of
+42:00:00:00:08:05, the pci0 interface would use MAC address 42:00:00:00:08:05
+while the pci1 interface would use 42:00:00:00:09:05. For this to work, each
+of the base MAC addresses must be unique.

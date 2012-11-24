@@ -1,0 +1,318 @@
+Software requirements
+=====================
+
+   On the PC host side, you need a Linux with recent stable kernel
+   (2.4.19 currently) plus patch usbdnet-2.4.19.patch.gz applied. Get
+   this patch from http://www.ruault.com/Zaurus/patches and apply to your
+   kernel.
+   
+   
+Software configuration
+======================
+
+Host side
+---------
+
+   On the PC host side, you need to configure the kernel to support USB
+   serial and network devices. Assuming you are using "make menuconfig"
+   or "make xconfig", go to "USB Support" section and enable the options
+   as follows ("M" means "enable as a loadable module"):
+   
+           - Support for USB                                      <M>
+           - Preliminary USB device filesystem                    <Y>
+   
+   Then choose a driver for your USB controller and enable it as module,
+   i.e. exactly one of the following:
+   
+           - EHCI HCD (USB 2.0) support (EXPERIMENTAL)            <M>
+           or
+           - UHCI (Intel PIIX4, VIA, ...) support                 <M>
+           or
+           - UHCI Alternate Driver (JE) support                   <M>
+           or
+           - OHCI (Compaq, iMacs, OPTi, SiS, ALi, ...) support    <M>
+   
+   Then enable:
+   
+           - USBD Network (Encapsulated) Host-to-Host Link        <M>
+   
+   and enter 4 hex values:
+   
+           - USBD Network idVendor:                               dead
+           - USBD Network idProduct:                              beef
+           - USBD Network Class:                                  2
+           - USBD Network SubClass:                               a
+   
+   Then go to "USB Serial Converter support" subsection and enable:
+   
+           - USB Serial Converter support                         <M>
+           - USB Generic Serial Driver                            <Y>
+   
+   Important notice: configuration options "USBD Network idVendor" and
+   "USBD Network idProduct" listed above can have arbitrary hex values,
+   but they must match appropriate values set during PXA250 Linux
+   kernel configuration (see below). But you must not change values of
+   "USBD Network Class" (must be always 2) and "USBD Network SubClass"
+   (must be always a).
+   
+   Next, recompile the kernel and install kernel itself and modules as
+   usual.
+   
+   After this, make sure you have the following modules installed:
+     * usbcore.o - the core of host USB subsystem
+     * [host controller driver].o - driver for the host USB controller
+     * usbdnet.o - host-side network function driver
+     * usbserial.o - host-side serial function driver
+   
+   For example, if you are using UHCI host controller and the kernel
+   modules are placed in their default locations, type:
+   
+     find /lib/modules/2.4.19/kernel/drivers/usb -type f
+   
+   at the shell prompt. You should see something like this:
+   
+           /lib/modules/2.4.19/kernel/drivers/usb/usb-uhci.o
+           /lib/modules/2.4.19/kernel/drivers/usb/usbcore.o
+           /lib/modules/2.4.19/kernel/drivers/usb/usbdnet.o
+           /lib/modules/2.4.19/kernel/drivers/usb/serial/usbserial.o
+   
+   If this is true, host configuration is completed.
+   
+PXA250 client side
+------------------
+
+   On the PXA250 client side, you need to configure the kernel to
+   include USB Device Support. Please be patient because this
+   configuration is quite complex and has lot of options. Again, assuming
+   you are using "make menuconfig" or "make xconfig", go to "USB Support"
+   section, then go to "USB Device Support" subsection and enable the
+   options as follows:
+   
+           - Support for USB Devices (as device, not host)        <M>
+           - VendorID (hex value)                                 dead
+           - ProductID (hex value)                                beef
+           - Product Name                                         PXA250
+           - Manufacturer                                         Intel
+           - Self powered                                         <Y>
+           - USBD Proc FS                                         <Y>
+   
+   Next, go to the "Network Function" submenu and set:
+   
+           - Network Function Driver                              <M>
+           - Overide VendorID (hex value)                         dead
+           - Overide ProductID (hex value)                        beef
+           - Default Network interface name                       usbd
+           - OUT Endpoint (0-15)                                  2
+           - OUT PacketSize (16, 32, 64)                          64
+           - IN Endpoint (0-15)                                   1
+           - IN PacketSize (16, 32, 64)                           64
+           - INT Endpoint (0-15)                                  5
+           - INT PacketSize (8, 16)                               16
+           - CDC Mode                                             <Y>
+           - Default Remote MAC Address (e.g. 400002000001)       400002000001
+           - RemoteNetwork OUI (e.g. 400002)                      400002
+           - Use MAC Address as device Serial Number              <Y>
+           - Default Local MAC Address (e.g. 400001000001)        400001000001
+           - Local Network OUI (e.g. 400001)                      400001
+   
+   Then return to "USB Device Support" subsection (one level above), go
+   to the "Serial Function" submenu and set:
+   
+           - Generic Serial Function                              <M>
+           - Overide VendorID (hex value)                         dead
+           - Overide ProductID (hex value)                        beef
+           - OUT Endpoint (0-15)                                  2
+           - IN  PacketSize (16, 32, 64)                          64
+           - IN  Endpoint (0-15)                                  1
+           - OUT PacketSize (16, 32, 64)                          64
+           - INT Endpoint (0-15)                                  5
+           - INT PacketSize (8, 16)                               16
+   
+   And, finally, return to "USB Device Support" subsection (one level
+   above), go to the "USB Device Bus Interface Support" subsection and
+   enable:
+   
+           - PXA (Xscale) support                                 <M>
+   
+   If you want to use DMA for USB IN transfers (usually you want), then
+   also enable:
+   
+           - Use DMA for IN transfers                             <Y>
+   
+   If you want to _try_ to use DMA for USB OUT transfers, then also
+   enable:
+   
+          - Use DMA for OUT transfers                             <Y>
+   
+   Note: this function may not work on all revisions of the PXA250.
+   See Intel's Specification Update for details.
+   
+   Then configuration is completed.
+   
+   Again, recompile and install the kernel and modules as usual.
+   
+   After this, make sure you have the following modules installed:
+     * usbdcore.o - the core of USB device subsystem
+     * serial_fd.o - the serial function driver
+     * net_fd.o - the network function driver
+     * pxa_bi.o - the low-level device controller driver
+       
+   For example, if your PXA250 target uses NFS root on
+   /tftpboot/127.0.0.1 and modules are installed in their default
+   locations, type the following at the shell prompt:
+   
+     cd /tftpboot/127.0.0.1/lib/modules/2.4.18_dbpxa250
+     find kernel/drivers/usb/device -type f
+   
+   You should see something like this:
+   
+     kernel/drivers/usb/device/usbdcore.o
+     kernel/drivers/usb/device/bi/pxa_bi.o
+     kernel/drivers/usb/device/net_fd/net_fd.o
+     kernel/drivers/usb/device/serial_fd/serial_fd.o
+   
+   If this is true, congratulations - client configuration is also
+   completed.
+   
+    
+Running
+=======
+
+Setting up Serial-over-USB connectivity
+---------------------------------------
+   
+   On the host side, you need to load kernel modules, exactly in the
+   following order, by typing:
+   
+     insmod usbcore
+     insmod [host controller driver]
+     insmod usbserial vendor=0xdead product=0xbeef
+   
+   On the PXA250 client side, you need to load kernel modules, exactly
+   in the following order, by typing:
+   
+     insmod usbdcore
+     insmod serial_fd vendor_id=0xdead product_id=0xbeef
+     insmod pxa_bi
+   
+   Then re-plug the USB cable and examine log files (usually somewhere in
+   /var/log, check your /etc/syslog.conf) on the host system. You should
+   see (date and host name fields are skipped):
+   
+      kernel: hub.c: USB new device connect on bus1/1, assigned device number 9
+      kernel: usb.c: kmalloc IF c0f74ec0, numif 1
+      kernel: usb.c: new device strings: Mfr=1, Product=2, SerialNumber=0
+      kernel: usb.c: USB device number 9 default language ID 0x4e3e
+      kernel: Manufacturer: Intel
+      kernel: Product: PXA250
+      kernel: usbserial.c: Generic converter detected
+      kernel: usbserial.c: Generic converter now attached to ttyUSB0
+      (or usb/tts/0 for devfs)
+      kernel: usb.c: serial driver claimed interface c0f74ec0
+   
+   And, finally, try to transfer a simple text string over serial
+   connection.
+   
+   On the PC side, type:
+   
+     cat /dev/ttyUSB0
+   
+   On the PXA250 side, type
+   
+     echo "This is a test" > /dev/ttyUSB0
+   
+   To see a message on the PC side, try to do 'cat' on the PXA250 side
+   and 'echo' on PC side. If the message can be seen on both sides, the
+   serial connection is properly established.
+   
+   Note: 'echo' will not send end-of-file (EOF), so 'cat' on the receiver
+   side will never complete. You must interrupt it with Ctrl-C.
+   
+Setting up Ethernet-over-USB connectivity
+-----------------------------------------
+   
+   On the host side, you need to load kernel modules, exactly in the
+   following order, by typing:
+   
+     insmod usbcore
+     insmod [host controller driver]
+     insmod usbdnet
+   
+   On the PXA250 client side, you need to load kernel modules, exactly
+   in the following order, by typing:
+   
+     insmod usbdcore
+     insmod net_fd
+     insmod pxa_bi
+   
+   Then re-plug the USB cable and examine log files on the host system.
+   If the network connection is properly established, you should see
+   something like this (date and host name fields are skipped):
+   
+     kernel: usb.c: skipped 4 class/vendor specific interface descriptors
+     kernel: usb.c: new device strings: Mfr=1, Product=2, SerialNumber=0
+     kernel: usb.c: USB device number 12 default language ID 0x409
+     kernel: Manufacturer: Intel
+     kernel: Product: PXA250
+     kernel: usbdnet: probe
+     kernel: probe: -> idVendor: dead idProduct: beef InterfaceClass 02 \
+             InterfaceSubclass: 0a
+     kernel: idp_search[0]: idVendor: 049f idProduct: ffff bDeviceClass 02 \
+             bInterfaceClass: 02 bInterfaceSubclass: 06
+   
+   [Lots of lines with "idp_search[0]]..." here]
+   
+     kernel: idp_search[0]: MATCH
+     kernel: probe[0]: MDLM Device data_interface c224f2e0
+     kernel: usbdnet: padded
+     kernel: probe[0:0]: endpoint bmAttributes: 02 address: 02
+     kernel: probe[0:0]: tx ep
+     kernel: probe[0:1]: endpoint bmAttributes: 02 address: 81
+     kernel: probe[0:1]: rx ep
+     kernel: probe[0:2]: endpoint bmAttributes: 03 address: 85
+     kernel: probe[0]: FOUND MATCH data_interface: c224f2e0
+     kernel: cdc_interface: 00000000 mdlm_interface: c224f2e0 data_interface: c224f2e0 \
+                   tx_ep: c2afd8a0 rx_ep: c2afd8b4
+     kernel: probe[0]: setting configuration 1
+     kernel: usb.c: ignoring set_interface for dev 12, iface 0, alt 0
+     kernel: probe[0]: claiming interface(s)
+     kernel: usb.c: usbdnet driver claimed interface c3b17d20
+     kernel: probe[0]: setting interface 0 alternate: 0
+     kernel: probe[0]: rx_size:  64 tx_size:  64
+     kernel: probe[0]: rx_ep  :  81 tx_ep  :   2
+     kernel: probe[0]: success v0.4b
+     kernel: usb.c: usbdnet driver claimed interface c3b17d20
+   
+   Then type 'ifconfig -a' on both PC host and PXA250 client.
+   In both cases, you should see unconfigured (i.e. with no IP
+   addresses assigned) network interfaces. On the host side:
+   
+           usb0      Link encap:Ethernet  HWaddr 40:00:00:00:FF:0C
+                     BROADCAST MULTICAST  MTU:1500  Metric:1
+                     RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+                     TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+                     collisions:0 txqueuelen:100
+                     RX bytes:0 (0.0 b)  TX bytes:0 (0.0 b)
+   
+   On the PXA250 client side:
+   
+           usbd0     Link encap:Ethernet  HWaddr 40:00:01:00:00:01
+                     BROADCAST MULTICAST  MTU:1500  Metric:1
+                     RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+                     TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+                     collisions:0 txqueuelen:100
+                     RX bytes:0 (0.0 b)  TX bytes:0 (0.0 b)
+   
+   Configure both interfaces by typing the following on PC host
+   side:
+   
+     ifconfig usb0 10.1.1.1
+   
+   On PXA250 client side:
+   
+     ifconfig usbd0 10.1.1.2
+   
+   And, finally, try to ping client from PC host and vice versa. If this
+   works and ping reports no packet loss, the network connection is
+   properly established.
+

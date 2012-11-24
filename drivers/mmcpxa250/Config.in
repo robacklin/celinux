@@ -1,0 +1,10 @@
+mainmenu_option next_comment
+comment 'MMC PXA250 device drivers'
+
+dep_tristate 'PXA250 MMC driver' CONFIG_MMC_PXA  $CONFIG_MMCPXA250
+dep_tristate 'MMC block driver' CONFIG_MMC_BLOCK  $CONFIG_MMCPXA250
+if [ "$CONFIG_MMC_BLOCK" = "y" -o "$CONFIG_MMC_BLOCK" = "m" ]; then
+   bool '  MMC partitioning support' CONFIG_MMC_PARTITIONS
+fi
+				       
+endmenu
